@@ -83,16 +83,19 @@ async def _invoke(
 
     if result.timed_out:
         await quota.record(purpose, settings.claude_backend, job_id=job_id, duration_ms=duration_ms, success=False, error="timeout")
+        await quota.maybe_alert_threshold()
         raise ClaudeInvocationError(f"claude -p timed out after {INVOCATION_TIMEOUT_S}s")
 
     if result.returncode != 0:
         await quota.record(purpose, settings.claude_backend, job_id=job_id, duration_ms=duration_ms, success=False, error=result.stderr[:500])
+        await quota.maybe_alert_threshold()
         raise ClaudeInvocationError(f"claude -p exited {result.returncode}: {result.stderr[:300]}")
 
     try:
         envelope = json.loads(result.stdout)
     except json.JSONDecodeError as e:
         await quota.record(purpose, settings.claude_backend, job_id=job_id, duration_ms=duration_ms, success=False, error="unparseable --output-format json envelope")
+        await quota.maybe_alert_threshold()
         raise ClaudeInvocationError("could not parse claude --output-format json envelope") from e
 
     model_usage = envelope.get("modelUsage") or {}
@@ -106,6 +109,7 @@ async def _invoke(
         success=not envelope.get("is_error", False),
         error=None if not envelope.get("is_error") else str(envelope.get("result"))[:500],
     )
+    await quota.maybe_alert_threshold()
 
     if envelope.get("is_error"):
         raise ClaudeInvocationError(f"claude reported is_error: {envelope.get('result')}")

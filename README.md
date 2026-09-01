@@ -93,6 +93,9 @@ antes do `make`.
 
 O heartbeat horário (config `STATUS_CHANNEL_ID` no `.env`) posta uptime,
 jobs na fila/rodando e uso de quota do Claude nesse canal automaticamente.
+Esse mesmo canal recebe um aviso extra assim que o uso do Claude cruzar 80%
+da quota diária — dispara na hora (logo apos a chamada que cruzou) e depois
+no maximo 1x a cada 6h enquanto continuar >= 80%, pra nao virar spam.
 
 ## Como o "cérebro" é usado com economia
 

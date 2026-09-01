@@ -5,8 +5,23 @@ bypass the daily cap — this is what keeps the Pro-plan usage predictable.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Awaitable, Callable
 
 from core.db import database
+
+ALERT_THRESHOLD = 0.8
+ALERT_MIN_INTERVAL_HOURS = 6
+_ALERT_LAST_SENT_KEY = "quota_alert_last_sent"
+
+AlertHook = Callable[[int, int, float], Awaitable[None]]
+_alert_hook: AlertHook | None = None
+
+
+def set_alert_hook(hook: AlertHook | None) -> None:
+    """Registered by bot/client.py so this module can push a Discord
+    notification without core/ importing anything Discord-specific."""
+    global _alert_hook
+    _alert_hook = hook
 
 
 async def get_daily_budget() -> int:
@@ -31,6 +46,31 @@ async def can_invoke() -> bool:
     if budget <= 0:
         return False
     return (await invocations_last_24h()) < budget
+
+
+async def maybe_alert_threshold() -> None:
+    """Call after anything that could change usage (a recorded invocation)
+    or on a timer (the hourly heartbeat) — cheap to call often since it's
+    a no-op below the threshold and rate-limited above it."""
+    budget = await get_daily_budget()
+    if budget <= 0 or _alert_hook is None:
+        return
+
+    used = await invocations_last_24h()
+    ratio = used / budget
+
+    if ratio < ALERT_THRESHOLD:
+        await database.set_setting(_ALERT_LAST_SENT_KEY, "")
+        return
+
+    last_sent_raw = await database.get_setting(_ALERT_LAST_SENT_KEY, "")
+    if last_sent_raw:
+        last_sent = datetime.fromisoformat(last_sent_raw)
+        if datetime.now(timezone.utc) - last_sent < timedelta(hours=ALERT_MIN_INTERVAL_HOURS):
+            return
+
+    await database.set_setting(_ALERT_LAST_SENT_KEY, datetime.now(timezone.utc).isoformat())
+    await _alert_hook(used, budget, ratio)
 
 
 async def record(

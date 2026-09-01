@@ -63,6 +63,7 @@ class MegatronBot(commands.Bot):
         self.settings = settings
         self.job_queue = JobQueue(settings)
         self.job_queue.set_progress_hook(self._on_job_progress)
+        claude_quota.set_alert_hook(self._on_quota_alert)
         self._started_at = time.monotonic()
 
     async def setup_hook(self) -> None:
@@ -120,6 +121,11 @@ class MegatronBot(commands.Bot):
         budget = await claude_quota.get_daily_budget()
         paused = (await database.get_setting("paused", "0")) == "1"
 
+        # Also catches the "quota stuck >= 80% with the bot otherwise idle"
+        # case — invoke.py only checks this right after a call is made, so
+        # this hourly tick is what reminds the owner even with no new jobs.
+        await claude_quota.maybe_alert_threshold()
+
         embed = discord.Embed(
             title="megatron: online",
             description=(
@@ -138,6 +144,30 @@ class MegatronBot(commands.Bot):
     @_heartbeat.before_loop
     async def _before_heartbeat(self) -> None:
         await self.wait_until_ready()
+
+    async def _on_quota_alert(self, used: int, budget: int, ratio: float) -> None:
+        if not self.settings.status_channel_id:
+            logger.warning(
+                "Claude quota at %.0f%% (%d/%d) but STATUS_CHANNEL_ID is not set — cannot notify",
+                ratio * 100, used, budget,
+            )
+            return
+        try:
+            channel = self.get_channel(self.settings.status_channel_id) or await self.fetch_channel(
+                self.settings.status_channel_id
+            )
+            embed = discord.Embed(
+                title="⚠️ Quota do Claude alta",
+                description=(
+                    f"{used}/{budget} invocacoes nas ultimas 24h ({ratio * 100:.0f}%).\n"
+                    f"Novas triagens/reports vao parar quando bater 100% — use `/quota` pra "
+                    f"acompanhar ou `/system pause` se quiser segurar novos jobs."
+                ),
+                color=discord.Color.orange(),
+            )
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            logger.warning("failed to post quota alert to status channel")
 
     async def _on_job_progress(self, job_id: int, message: str) -> None:
         job = await get_job(job_id)
