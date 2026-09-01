@@ -94,6 +94,11 @@ texto puro, não um agente com as mãos livres.
 
 ### Com Docker (recomendado)
 
+**Não instale nenhuma ferramenta separadamente.** A imagem já vem com
+`subfinder`, `httpx`, `nuclei`, `katana`, `gau`, `dalfox` (compilados),
+`ffuf`/`sqlmap`/`nmap` (apt) e o próprio Claude Code CLI (npm) — tudo
+dentro do container. O único pré-requisito no host é o Docker instalado.
+
 ```bash
 git clone https://github.com/gshell0st/megatron.git
 cd megatron
@@ -104,6 +109,12 @@ make logs     # acompanhar
 O container reusa a sessão do Claude Code já autenticada no seu host
 (monta `~/.claude` e `~/.claude.json` read-only) — não precisa `claude
 login` nem `ANTHROPIC_API_KEY` dentro do container.
+
+Pra rodar numa máquina nova (VPS, outra box): instale só o Docker lá, copie
+o repositório (ou `git clone`) + seu `.env`/`scope.yaml` já preenchidos, e
+rode `make`. Nada de `apt install subfinder` nem `go install` na máquina
+de destino — se você está instalando uma tool manualmente, algo saiu do
+fluxo pretendido.
 
 ### Manual
 
@@ -122,7 +133,9 @@ cp scope.yaml.example scope.yaml
 Requer também: `subfinder`, `httpx`, `nuclei`, `katana`, `gau`, `ffuf`,
 `sqlmap`, `dalfox`, `nmap` no PATH (ou configurados via `TOOL_PATH_*` no
 `.env`) e o [Claude Code CLI](https://github.com/anthropics/claude-code)
-autenticado.
+autenticado. **Esse é o único caminho de instalação que exige instalar as
+ferramentas você mesmo** — se não tem um motivo específico pra rodar fora
+de container, use o caminho Docker acima.
 
 Pra rodar 24/7 sem Docker, veja `scripts/run_dev.sh` (tmux) ou
 `scripts/megatron.service` (systemd --user, restart automático).
@@ -149,6 +162,16 @@ Pra rodar 24/7 sem Docker, veja `scripts/run_dev.sh` (tmux) ou
 `scope.yaml` (gitignored, nunca commitado) é o **único** lugar que decide o
 que o bot pode tocar. Qualquer alvo fora dele é recusado, sem exceção —
 mesmo que alguém peça por outro canal.
+
+Editar esse arquivo à mão é opcional, não obrigatório: no dia a dia, o
+alvo entra pelo próprio Discord, sem precisar mexer em nada no servidor —
+```
+/scope add domain:novo-alvo.com mode:passive rate_limit_rps:5 excluded_paths:/admin,/billing
+```
+já cria (ou atualiza) a entrada, incluindo os paths que `ffuf`/`dalfox`/
+`sqlmap` nunca devem tocar. `/scope import` faz o mesmo em lote a partir de
+um programa HackerOne/Intigriti. Editar `scope.yaml` direto continua
+possível pra revisar tudo de uma vez, mas nada aqui exige isso.
 
 ```yaml
 targets:
@@ -206,6 +229,36 @@ Defaults conservadores por design: `nuclei` exclui tags `dos`/`fuzz`/
 `intrusive`/`default-login`; `sqlmap` roda em `--risk=1 --level=1`, sem
 técnicas destrutivas (stacked queries excluídas); `ffuf`/`dalfox` usam
 wordlists curtas e rate limit configurável por alvo.
+
+### Sobre volume de requisições e WAFs
+
+O objetivo aqui nunca é *bypassar* uma WAF — é não acordar uma. Um bloqueio
+no meio de um teste significa perder a janela de teste inteira, então o
+volume de tráfego é limitado em várias camadas independentes, todas antes
+de qualquer requisição sair:
+
+- **`rate_limit_rps` por alvo** (`scope.yaml`) — respeitado por
+  `subfinder`, `httpx`, `nuclei`, `ffuf`, `dalfox` (via `--worker`) e
+  `sqlmap` (via `--delay`, derivado do mesmo valor). Nenhuma ferramenta
+  ativa roda sem essa checagem.
+- **`excluded_paths` por alvo** — prefixos que `ffuf`/`dalfox`/`sqlmap`
+  nunca tocam, mesmo que estejam na wordlist ou na URL passada.
+- **`MAX_HOSTS_FOR_HTTPX` / `MAX_HOSTS_FOR_NUCLEI`**
+  (`core/pipelines/recon.py`) — travam quantos hosts um único `/recon` pode
+  varrer, mesmo se `subfinder` devolver milhares de subdomínios (comum em
+  domínios com muito ruído em certificate-transparency).
+- **`MEGATRON_MAX_CONCURRENT_JOBS`** (padrão `1`) — um job por vez, nunca
+  vários alvos (ou vários scans do mesmo alvo) sendo martelados em
+  paralelo.
+- **`/system pause`** — kill switch imediato caso algo pareça errado no
+  meio de um scan.
+
+Recomendação prática: comece novos alvos com `rate_limit_rps` baixo (2–5),
+principalmente se o programa mencionar Cloudflare/Akamai/outro CDN-WAF na
+descrição do escopo — só suba depois de confirmar que não há bloqueios.
+Recon (`subfinder`/`httpx`/`nuclei`) já é 100% passivo/baixo-impacto por
+natureza; o cuidado maior é em `/scan` (ffuf/dalfox/sqlmap), que é onde o
+volume por segundo realmente importa.
 
 ## Estrutura do projeto
 

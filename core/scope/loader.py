@@ -78,6 +78,7 @@ class ScopeStore:
         platform: str | None = None,
         program_handle: str | None = None,
         platform_scope_id: int | None = None,
+        excluded_paths: tuple[str, ...] | None = None,
     ) -> None:
         domain = domain.strip().lower()
         if mode not in ("passive", "active"):
@@ -101,13 +102,15 @@ class ScopeStore:
                         t["program_handle"] = program_handle
                     if platform_scope_id is not None:
                         t["platform_scope_id"] = platform_scope_id
+                    if excluded_paths is not None:
+                        t["excluded_paths"] = list(excluded_paths)
                     break
             else:
                 new_entry = {
                     "domain": domain,
                     "mode": mode,
                     "rate_limit_rps": rate_limit_rps,
-                    "excluded_paths": [],
+                    "excluded_paths": list(excluded_paths) if excluded_paths is not None else [],
                     "notes": notes,
                 }
                 if platform:

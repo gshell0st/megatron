@@ -8,6 +8,12 @@ manual review regardless of what the parser catches.
 --technique=BEUQ deliberately excludes S (stacked queries — can execute
 arbitrary extra statements) and T (time-based blind — slow/noisy); risk=1
 level=1 keep payloads to the least invasive tests. Requires mode=active.
+
+Unlike every other active-scan wrapper, sqlmap has no notion of "requests
+per second" — its own throttle is --delay (seconds between requests). We
+derive that from scope.rate_limit_rps so this tool isn't the one exception
+that ignores the target's configured pace and trips a WAF the others were
+built to avoid.
 """
 from __future__ import annotations
 
@@ -31,6 +37,7 @@ class SqlmapTool(ToolWrapper):
     default_timeout = 600
 
     def build_command(self, tool_path: str, target: str, scope: ScopeEntry, job_id: int) -> list[str]:
+        delay = round(1.0 / max(scope.rate_limit_rps, 0.1), 2)
         return [
             tool_path,
             "-u", target,
@@ -39,6 +46,7 @@ class SqlmapTool(ToolWrapper):
             "--level=1",
             "--technique=BEUQ",
             "--threads=1",
+            "--delay", str(delay),
             "-v", "1",
         ]
 

@@ -31,7 +31,12 @@ def setup(bot) -> None:
         await interaction.response.send_message(embed=embed)
 
     @group.command(name="add", description="Adiciona ou atualiza um alvo no escopo")
-    @app_commands.describe(domain="Dominio raiz autorizado", mode="passive ou active", rate_limit_rps="Requisicoes/seg maximas")
+    @app_commands.describe(
+        domain="Dominio raiz autorizado",
+        mode="passive ou active",
+        rate_limit_rps="Requisicoes/seg maximas",
+        excluded_paths="Prefixos de path a nunca tocar, separados por virgula (ex: /admin,/billing)",
+    )
     @app_commands.choices(mode=[
         app_commands.Choice(name="passive (so recon)", value="passive"),
         app_commands.Choice(name="active (permite /scan)", value="active"),
@@ -42,12 +47,17 @@ def setup(bot) -> None:
         mode: app_commands.Choice[str],
         rate_limit_rps: float = 5.0,
         notes: str = "",
+        excluded_paths: str = "",
     ) -> None:
-        get_scope_store().add(domain, mode=mode.value, rate_limit_rps=rate_limit_rps, notes=notes)
-        await audit_log(str(interaction.user.id), "scope:add", target=domain, mode=mode.value, rate_limit_rps=rate_limit_rps)
-        await interaction.response.send_message(
-            embed=ok_embed("Escopo atualizado", f"`{domain}` -> mode={mode.value}, rate_limit={rate_limit_rps}rps")
+        paths = tuple(p.strip() for p in excluded_paths.split(",") if p.strip()) if excluded_paths else None
+        get_scope_store().add(
+            domain, mode=mode.value, rate_limit_rps=rate_limit_rps, notes=notes, excluded_paths=paths
         )
+        await audit_log(str(interaction.user.id), "scope:add", target=domain, mode=mode.value, rate_limit_rps=rate_limit_rps)
+        msg = f"`{domain}` -> mode={mode.value}, rate_limit={rate_limit_rps}rps"
+        if paths:
+            msg += f", excluded_paths={list(paths)}"
+        await interaction.response.send_message(embed=ok_embed("Escopo atualizado", msg))
 
     @group.command(name="remove", description="Remove um alvo do escopo")
     async def scope_remove(interaction: discord.Interaction, domain: str) -> None:
