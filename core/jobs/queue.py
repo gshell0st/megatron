@@ -18,6 +18,7 @@ from core.db import database
 from core.findings.dedup import set_finding_status
 from core.findings.severity import get_triage_candidates
 from core.jobs import runner
+from core.pipelines.active_scan import run_active_scan_pipeline
 from core.pipelines.recon import run_recon_pipeline
 from core.scope.validator import ScopeViolation, require_scope
 
@@ -118,6 +119,7 @@ class JobQueue:
 
         target = row["target"]
         job_type = row["job_type"]
+        params = json.loads(row["params_json"] or "{}")
         await database.execute(
             "UPDATE jobs SET status='running', started_at=? WHERE id=?", (_now(), job_id)
         )
@@ -141,8 +143,12 @@ class JobQueue:
             summary = await run_recon_pipeline(
                 self.settings, target, scope, job_id, progress_cb=progress
             )
+        elif job_type in ("ffuf", "xss", "sqli"):
+            summary = await run_active_scan_pipeline(
+                self.settings, job_type, target, scope, job_id, params, progress_cb=progress
+            )
         else:
-            raise NotImplementedError(f"job type '{job_type}' is not implemented yet (Phase 2)")
+            raise NotImplementedError(f"job type '{job_type}' is not implemented")
 
         await database.execute(
             "UPDATE jobs SET status='done', finished_at=? WHERE id=?", (_now(), job_id)

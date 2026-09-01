@@ -23,7 +23,7 @@ class NucleiTool(ToolWrapper):
     name = "nuclei"
     default_timeout = 300
 
-    def build_command(self, tool_path: str, target: str, scope: ScopeEntry) -> list[str]:
+    def build_command(self, tool_path: str, target: str, scope: ScopeEntry, job_id: int) -> list[str]:
         rate = max(1, int(scope.rate_limit_rps))
         return [
             tool_path,

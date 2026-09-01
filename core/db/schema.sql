@@ -59,6 +59,25 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(timestamp);
 
+CREATE TABLE IF NOT EXISTS report_drafts (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    finding_ids_json          TEXT NOT NULL,           -- JSON array of findings.id this draft covers
+    target                    TEXT NOT NULL,
+    platform                  TEXT NOT NULL,           -- 'hackerone' (only one with real submission today)
+    program_handle            TEXT NOT NULL,
+    title                     TEXT NOT NULL,
+    impact                    TEXT NOT NULL,
+    vulnerability_information TEXT NOT NULL,
+    severity_rating           TEXT,
+    status                    TEXT NOT NULL DEFAULT 'pending', -- pending|submitted|discarded
+    created_by                TEXT NOT NULL,
+    created_at                TEXT NOT NULL,
+    submitted_at              TEXT,
+    external_report_id        TEXT,
+    external_report_url       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_report_drafts_status ON report_drafts(status);
+
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

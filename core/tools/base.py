@@ -21,9 +21,14 @@ class ToolWrapper(ABC):
     default_timeout: float = 180
 
     @abstractmethod
-    def build_command(self, tool_path: str, target: str, scope: ScopeEntry) -> list[str]:
+    def build_command(
+        self, tool_path: str, target: str, scope: ScopeEntry, job_id: int
+    ) -> list[str]:
         """Return the full argv for this tool, using scope.rate_limit_rps /
-        scope.excluded_paths for any throttling/exclusion flags."""
+        scope.excluded_paths for any throttling/exclusion flags. job_id is
+        provided so a wrapper can stage job-scoped input files (e.g. ffuf's
+        excluded-paths-filtered wordlist) under RAW_OUTPUT_DIR before the
+        subprocess starts."""
 
     @abstractmethod
     def parse_output(self, raw_stdout: str) -> list[dict[str, Any]]:
@@ -46,8 +51,9 @@ class ToolWrapper(ABC):
         hosts at a conservative rate limit legitimately takes longer than
         probing 5) instead of hardcoding one number for every input size."""
         tool_path = settings.tool_path(self.name)
-        cmd = self.build_command(tool_path, target, scope)
         output_path = RAW_OUTPUT_DIR / str(job_id) / f"{self.name}.out"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd = self.build_command(tool_path, target, scope, job_id)
         stdin_data = ("\n".join(stdin_lines) + "\n").encode() if stdin_lines else None
         timeout = timeout_override if timeout_override is not None else self.default_timeout
 

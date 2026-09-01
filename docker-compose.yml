@@ -1,0 +1,20 @@
+services:
+  megatron:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./scope.yaml:/app/scope.yaml
+      - ./data:/app/data
+      # Reuses the host's already-authenticated Claude Pro plan session so
+      # the container never needs `claude login` or API-key billing.
+      #
+      # Deliberately NOT ${HOME}: on a snap-installed Docker (e.g. Kali),
+      # `docker compose` runs under snap confinement, which rewrites $HOME
+      # to snap's own sandboxed directory — ${HOME} here would silently
+      # resolve to the wrong path. MEGATRON_HOST_HOME is written into .env
+      # by `make setup`, which runs as a normal (non-snap-confined)
+      # process and sees the real $HOME.
+      - ${MEGATRON_HOST_HOME}/.claude:/root/.claude:ro
+      - ${MEGATRON_HOST_HOME}/.claude.json:/root/.claude.json:ro
+    restart: unless-stopped

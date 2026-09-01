@@ -86,8 +86,11 @@ def _env_float(key: str, default: float) -> float:
 @dataclass(frozen=True)
 class Settings:
     discord_bot_token: str
+    discord_application_id: int
+    discord_public_key: str | None
     owner_discord_id: int
     guild_id: int
+    status_channel_id: int | None
 
     max_concurrent_jobs: int
     claude_daily_budget: int
@@ -95,6 +98,10 @@ class Settings:
     anthropic_api_key: str | None
     api_call_cost_cap_usd: float
     emergency_stop: bool
+
+    hackerone_api_username: str | None
+    hackerone_api_token: str | None
+    intigriti_api_token: str | None
 
     tool_paths: dict[str, str | None] = field(default_factory=dict)
 
@@ -124,16 +131,24 @@ def load_settings() -> Settings:
             + ". Install them or set TOOL_PATH_<NAME> in .env."
         )
 
+    status_channel_raw = os.environ.get("STATUS_CHANNEL_ID", "").strip()
+
     return Settings(
         discord_bot_token=os.environ.get("DISCORD_BOT_TOKEN", ""),
+        discord_application_id=_env_int("DISCORD_APPLICATION_ID", 0),
+        discord_public_key=os.environ.get("DISCORD_PUBLIC_KEY") or None,
         owner_discord_id=_env_int("OWNER_DISCORD_ID", 0),
         guild_id=_env_int("GUILD_ID", 0),
+        status_channel_id=int(status_channel_raw) if status_channel_raw else None,
         max_concurrent_jobs=_env_int("MEGATRON_MAX_CONCURRENT_JOBS", 1),
         claude_daily_budget=_env_int("MEGATRON_CLAUDE_DAILY_BUDGET", 20),
         claude_backend=os.environ.get("MEGATRON_CLAUDE_BACKEND", "cli"),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
         api_call_cost_cap_usd=_env_float("MEGATRON_API_CALL_COST_CAP_USD", 1.0),
         emergency_stop=_env_bool("MEGATRON_EMERGENCY_STOP", False),
+        hackerone_api_username=os.environ.get("HACKERONE_API_USERNAME") or None,
+        hackerone_api_token=os.environ.get("HACKERONE_API_TOKEN") or None,
+        intigriti_api_token=os.environ.get("INTIGRITI_API_TOKEN") or None,
         tool_paths=tool_paths,
     )
 

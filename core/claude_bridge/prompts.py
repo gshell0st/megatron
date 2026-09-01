@@ -29,9 +29,13 @@ TRIAGE_JSON_SCHEMA: dict[str, Any] = {
                         ],
                     },
                     "priority": {"type": "integer", "minimum": 1, "maximum": 5},
+                    "impact": {
+                        "type": "string",
+                        "description": "Concrete real-world impact if exploited — what an attacker actually gains, not just the technical defect.",
+                    },
                     "note": {"type": "string"},
                 },
-                "required": ["id", "verdict", "priority"],
+                "required": ["id", "verdict", "priority", "impact"],
             },
         },
         "next_actions": {
@@ -64,8 +68,21 @@ _TRIAGE_INSTRUCTIONS = """You are a bug-bounty triage analyst reviewing automate
 against a target the operator has EXPLICITLY AUTHORIZED for testing (verified by a \
 separate scope-enforcement system before this data ever reached you).
 
+IMPACT IS THE TOP PRIORITY HERE — above any individual vulnerability class, tool severity \
+label, or raw finding count. For every finding, first reason concretely about what an \
+attacker could ACTUALLY achieve if it's real: data exposure, credential/secret leakage, \
+account takeover, lateral movement, business/financial harm. A single finding with clear, \
+demonstrated impact matters more than a long list of low-impact or theoretical findings. \
+Where two or more findings could be chained into a bigger real-world consequence (e.g. an \
+exposed config file that leaks a credential usable elsewhere), say so explicitly — that \
+chained story is more valuable than either finding alone. Deprioritize anything that is \
+technically valid but has no plausible real-world impact path, even if its raw severity \
+label is high.
+
 For each finding, classify it as true-positive-likely, needs-manual-verification, or \
-likely-noise, and give it a priority from 1 (ignore) to 5 (investigate now).
+likely-noise; write a concrete one-sentence "impact" statement (what an attacker actually \
+gains — never just restate the technical defect); and give it a priority from 1 (ignore) \
+to 5 (investigate now) driven primarily by that impact, not by the tool's severity label.
 
 Recommend at most 3 next actions, using ONLY the fixed action vocabulary provided by \
 the schema. Never recommend destructive, out-of-scope, or high-volume/aggressive actions \
@@ -75,10 +92,59 @@ return an empty next_actions list.
 Respond with JSON matching the provided schema only — no prose outside the JSON."""
 
 _REPORT_INSTRUCTIONS = """You are writing a concise written report for the operator, \
-summarizing unreviewed bug-bounty findings against an authorized target. Group related \
-findings, call out anything that looks like a real exposure worth manual follow-up, and \
-be explicit about uncertainty. Keep it readable in a Discord message (short paragraphs, \
-no more than ~300 words). Respond with JSON matching the provided schema only."""
+summarizing unreviewed bug-bounty findings against an authorized target.
+
+IMPACT IS THE TOP PRIORITY HERE — above any individual vulnerability class, tool severity \
+label, or raw finding count. Lead with what an attacker could actually achieve, not with a \
+flat list of technical defects. Group related findings and, where they chain into a bigger \
+real-world consequence, tell that story explicitly rather than listing them separately. Be \
+explicit about uncertainty (soft-404s, unconfirmed responses) so low-confidence findings \
+don't get overstated. Keep it readable in a Discord message (short paragraphs, no more than \
+~300 words).
+
+For each finding included, write a concrete one-sentence "impact" statement (what an \
+attacker actually gains) and a priority from 1-5 driven by that impact. Respond with JSON \
+matching the provided schema only."""
+
+
+SUBMISSION_DRAFT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "impact": {"type": "string"},
+        "vulnerability_information": {"type": "string"},
+        "severity_rating": {
+            "type": "string",
+            "enum": ["none", "low", "medium", "high", "critical"],
+        },
+    },
+    "required": ["title", "impact", "vulnerability_information", "severity_rating"],
+}
+
+_SUBMISSION_DRAFT_INSTRUCTIONS = """You are drafting a HackerOne vulnerability report on \
+behalf of the operator, from findings that have ALREADY been triaged as true-positive-likely \
+against an authorized target.
+
+IMPACT IS THE TOP PRIORITY — lead the report with concrete real-world impact (what an \
+attacker actually gains), not a dry technical description. If multiple findings are \
+provided, weave them into a single coherent report only if they genuinely share a root \
+cause or chain into one bigger impact story; otherwise draft around the single \
+highest-impact finding and mention the others only briefly as secondary/related.
+
+Write:
+- title: short, specific, impact-oriented — not just the vulnerability class name.
+- impact: 2-4 sentences on concrete real-world consequence if exploited.
+- vulnerability_information: clear, numbered steps to reproduce (using the URLs/params/\
+details given), written for a program triager who has no other context.
+- severity_rating: none/low/medium/high/critical, judged by real impact — not by whatever \
+raw severity label the scanning tool assigned.
+
+Respond with JSON matching the provided schema only — no prose outside the JSON."""
+
+
+def build_submission_draft_prompt(target: str, findings: list[dict[str, Any]]) -> str:
+    payload = {"target": target, "findings": [_truncate_finding(f) for f in findings]}
+    return f"{_SUBMISSION_DRAFT_INSTRUCTIONS}\n\nDATA:\n{json.dumps(payload, default=str)}"
 
 
 def build_triage_prompt(job_id: int, target: str, findings: list[dict[str, Any]]) -> str:

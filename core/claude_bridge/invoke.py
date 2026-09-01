@@ -19,8 +19,10 @@ from typing import Any
 
 from core.claude_bridge import quota
 from core.claude_bridge.prompts import (
+    SUBMISSION_DRAFT_SCHEMA,
     TRIAGE_JSON_SCHEMA,
     build_report_prompt,
+    build_submission_draft_prompt,
     build_triage_prompt,
 )
 from core.config import CLAUDE_RAW_LOG_DIR, Settings
@@ -43,6 +45,7 @@ async def _invoke(
     purpose: str,
     job_id: int | None,
     log_name: str,
+    schema: dict[str, Any] = TRIAGE_JSON_SCHEMA,
 ) -> dict[str, Any]:
     if not await quota.can_invoke():
         raise ClaudeInvocationError("daily claude invocation budget exhausted")
@@ -55,7 +58,7 @@ async def _invoke(
         "--restricted",
         "--setting-sources", "",
         "--strict-mcp-config",
-        "--json-schema", json.dumps(TRIAGE_JSON_SCHEMA),
+        "--json-schema", json.dumps(schema),
     ]
     if settings.claude_backend == "api":
         cmd += ["--max-budget-usd", str(settings.api_call_cost_cap_usd)]
@@ -132,3 +135,19 @@ async def triage(settings: Settings, job_id: int, target: str, findings: list[di
 async def report(settings: Settings, target: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
     prompt = build_report_prompt(target, findings)
     return await _invoke(settings, prompt, purpose="report", job_id=None, log_name=f"report_{target}_{int(time.time())}")
+
+
+async def draft_submission(settings: Settings, target: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Produces {title, impact, vulnerability_information, severity_rating}
+    formatted for HackerOne's report fields. Never calls the platform API
+    itself — bot/commands/submit_cmds.py stores the result as a pending
+    report_drafts row and only submits after an explicit /submit confirm."""
+    prompt = build_submission_draft_prompt(target, findings)
+    return await _invoke(
+        settings,
+        prompt,
+        purpose="submission_draft",
+        job_id=None,
+        log_name=f"submission_draft_{target}_{int(time.time())}",
+        schema=SUBMISSION_DRAFT_SCHEMA,
+    )

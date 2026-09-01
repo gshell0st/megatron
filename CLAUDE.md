@@ -20,9 +20,19 @@ arquitetura completa (schema, contrato de invocação do Claude, comandos).
   CLAUDE.md pra isso.
 - O check owner-only em `bot/client.py` (`OwnerOnlyTree.interaction_check`)
   nunca pode ser enfraquecido ou contornado.
-- Claude é invocado no máximo 1x por job (triagem) e 1x por `/report` —
-  nunca por ferramenta, nunca por estágio do pipeline. Ver
+- Claude é invocado no máximo 1x por job (triagem), 1x por `/report` e 1x por
+  `/submit draft` — nunca por ferramenta, nunca por estágio do pipeline. Ver
   `core/claude_bridge/quota.py`.
+- Prompts (`core/claude_bridge/prompts.py`) sempre priorizam **impacto real**
+  acima de severidade bruta/contagem de achados — não remover essa framing
+  ao editar os prompts.
+- `/submit confirm` é o único lugar que chama
+  `core.platforms.hackerone.submit_report()` (envio real). `/submit draft`
+  nunca envia nada — só gera e guarda um rascunho em `report_drafts`. Nunca
+  criar um caminho que pule essa confirmação manual.
+- `/scope import` (HackerOne/Intigriti) sempre grava os alvos importados como
+  `mode=passive`, nunca `active` — ligar scan ativo é decisão manual do dono
+  via `/scope add`.
 
 ## Convenções
 
@@ -60,5 +70,6 @@ core/pipelines/ orquestra os wrappers em sequência (recon.py = Fase 1)
 core/jobs/      fila asyncio + runner de subprocess + modelos
 core/claude_bridge/  invocação headless do Claude (quota, prompts, invoke)
 core/findings/  dedup por hash + filtro de severidade pra triagem
+core/platforms/ clientes de API do HackerOne (leitura+submit) e Intigriti (só leitura)
 data/           gitignored — runtime (DB, logs, saída bruta das tools)
 ```

@@ -15,7 +15,7 @@ class SubfinderTool(ToolWrapper):
     # headroom; the pipeline treats a timeout here as non-fatal anyway.
     default_timeout = 150
 
-    def build_command(self, tool_path: str, target: str, scope: ScopeEntry) -> list[str]:
+    def build_command(self, tool_path: str, target: str, scope: ScopeEntry, job_id: int) -> list[str]:
         rate = max(1, int(scope.rate_limit_rps))
         return [
             tool_path,
