@@ -108,9 +108,6 @@ class MegatronBot(commands.Bot):
 
     @tasks.loop(hours=1)
     async def _heartbeat(self) -> None:
-        channel = self.get_channel(self.settings.status_channel_id) or await self.fetch_channel(
-            self.settings.status_channel_id
-        )
         uptime_s = int(time.monotonic() - self._started_at)
         hours, remainder = divmod(uptime_s, 3600)
         minutes, _ = divmod(remainder, 60)
@@ -136,10 +133,17 @@ class MegatronBot(commands.Bot):
             ),
             color=discord.Color.blurple(),
         )
+        # Fetching the channel and sending are both wrapped here — a
+        # permission problem (e.g. the bot's role can't see the configured
+        # STATUS_CHANNEL_ID) must not kill this recurring task forever;
+        # discord.ext.tasks stops the loop on an unhandled exception.
         try:
+            channel = self.get_channel(self.settings.status_channel_id) or await self.fetch_channel(
+                self.settings.status_channel_id
+            )
             await channel.send(embed=embed)  # type: ignore[union-attr]
-        except discord.HTTPException:
-            logger.warning("failed to post heartbeat to status channel")
+        except discord.HTTPException as e:
+            logger.warning("failed to post heartbeat to status channel: %s", e)
 
     @_heartbeat.before_loop
     async def _before_heartbeat(self) -> None:
