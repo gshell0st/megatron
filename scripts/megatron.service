@@ -1,0 +1,26 @@
+# Optional systemd --user unit for more resilient 24/7 operation than the
+# tmux script (auto-restarts on crash). This WSL image has systemd enabled.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/megatron.service ~/.config/systemd/user/
+#   loginctl enable-linger $USER   # keep it running after you log out of WSL
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now megatron
+#   journalctl --user -u megatron -f   # follow logs
+#
+# Edit WorkingDirectory/ExecStart below if this repo lives somewhere else.
+
+[Unit]
+Description=megatron bug bounty orchestrator
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/kali/megatron
+ExecStart=/home/kali/megatron/.venv/bin/python /home/kali/megatron/megatron run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

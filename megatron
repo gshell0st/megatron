@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""megatron — entrypoint CLI.
+
+Usage:
+    ./megatron run                  # start the Discord bot (long-running)
+    ./megatron initdb               # create/upgrade data/megatron.db
+    ./megatron scope check <target> # debug: check scope.yaml matching
+
+Run via the project venv: `.venv/bin/python megatron <command>` (or activate
+the venv first). See README.md for setup.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+
+from core.config import ensure_data_dirs, load_settings
+from core.db import database
+
+
+def cmd_initdb(_args: argparse.Namespace) -> None:
+    ensure_data_dirs()
+    asyncio.run(database.init_db())
+    print("DB initialized.")
+
+
+def cmd_scope_check(args: argparse.Namespace) -> None:
+    from core.scope.validator import ScopeViolation, is_in_scope
+
+    try:
+        entry = is_in_scope(args.target)
+    except ScopeViolation as e:
+        print(f"REJECTED: {e}")
+        sys.exit(1)
+
+    if entry is None:
+        print(f"REJECTED: '{args.target}' is not in scope.yaml")
+        sys.exit(1)
+    print(
+        f"OK: '{args.target}' matches scope entry '{entry.domain}' "
+        f"(mode={entry.mode}, rate_limit={entry.rate_limit_rps}rps, "
+        f"excluded_paths={list(entry.excluded_paths)})"
+    )
+
+
+def cmd_run(_args: argparse.Namespace) -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
+    ensure_data_dirs()
+    asyncio.run(database.init_db())
+    settings = load_settings()
+
+    if settings.emergency_stop:
+        print("MEGATRON_EMERGENCY_STOP=1 — refusing to start. Unset it in .env to run.")
+        sys.exit(1)
+    if not settings.discord_bot_token:
+        print("DISCORD_BOT_TOKEN is not set in .env")
+        sys.exit(1)
+    if not settings.owner_discord_id or not settings.guild_id:
+        print("OWNER_DISCORD_ID and GUILD_ID must be set in .env")
+        sys.exit(1)
+
+    from bot.client import MegatronBot
+
+    bot = MegatronBot(settings)
+    bot.run(settings.discord_bot_token)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="megatron")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("run", help="Start the Discord bot").set_defaults(func=cmd_run)
+    sub.add_parser("initdb", help="Initialize the SQLite database").set_defaults(func=cmd_initdb)
+
+    scope_parser = sub.add_parser("scope", help="Scope debug utilities")
+    scope_sub = scope_parser.add_subparsers(dest="scope_command", required=True)
+    check_parser = scope_sub.add_parser("check", help="Check if a target is in scope")
+    check_parser.add_argument("target")
+    check_parser.set_defaults(func=cmd_scope_check)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

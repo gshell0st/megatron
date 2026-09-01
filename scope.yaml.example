@@ -1,0 +1,32 @@
+# Escopo autorizado — megatron SÓ testa o que está listado aqui.
+# Qualquer alvo fora desta lista é recusado (scope gate), sem exceção.
+#
+# mode:
+#   passive -> só recon (subfinder/httpx/nuclei sem tags intrusivas). /scan é bloqueado.
+#   active  -> permite /scan (ffuf/dalfox/sqlmap), respeitando rate_limit_rps e excluded_paths.
+#
+# rate_limit_rps: requisições/seg máximas passadas às ferramentas para este alvo.
+# excluded_paths: prefixos de path nunca tocados por ffuf/dalfox/sqlmap.
+#
+# Nota: 'example.com' abaixo é só um placeholder de exemplo (dominio reservado
+# pra documentacao). Na pratica ele tem um numero anormal de subdominios em
+# certificate-transparency logs (poluicao de terceiros), entao um /recon nele
+# pode achar dezenas de milhares de "subdominios" e estourar os limites de
+# MAX_HOSTS_FOR_HTTPX/NUCLEI em core/pipelines/recon.py. Alvos reais de bug
+# bounty raramente tem esse volume — troque por um dominio de teste seu antes
+# de usar de verdade.
+
+targets:
+  - domain: example.com
+    mode: passive
+    rate_limit_rps: 5
+    excluded_paths: []
+    notes: "Programa X no HackerOne — só recon autorizado, sem scan ativo."
+
+  - domain: sub.example.org
+    mode: active
+    rate_limit_rps: 3
+    excluded_paths:
+      - /admin
+      - /billing
+    notes: "Bugcrowd — escopo restrito a este subdomínio, scan ativo leve permitido."
