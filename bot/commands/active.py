@@ -13,7 +13,7 @@ from core.scope.validator import is_in_scope
 def setup(bot) -> None:
     @bot.tree.command(
         name="scan",
-        description="Scan ativo leve: ffuf (arquivos expostos), xss (dalfox) ou sqli (sqlmap)",
+        description="Scan ativo leve: ffuf, xss, sqli ou webcheck (higiene web: git/env/backup/swagger/actuator/TLS/headers/...)",
     )
     @app_commands.describe(
         target="Dominio cadastrado em /scope com mode=active",
@@ -25,6 +25,7 @@ def setup(bot) -> None:
             app_commands.Choice(name="ffuf (arquivos/paths expostos)", value="ffuf"),
             app_commands.Choice(name="xss (dalfox)", value="xss"),
             app_commands.Choice(name="sqli (sqlmap)", value="sqli"),
+            app_commands.Choice(name="webcheck (higiene web: 11 categorias, ver README)", value="webcheck"),
         ]
     )
     async def scan(

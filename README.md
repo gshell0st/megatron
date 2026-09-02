@@ -20,6 +20,7 @@ aperta o botão final. Nada sai pra um programa sem sua confirmação manual.
 - [Criando o bot no Discord](#criando-o-bot-no-discord)
 - [Configurando o escopo](#configurando-o-escopo-obrigatório)
 - [Comandos](#comandos)
+- [Checks de higiene web (`/scan type:webcheck`)](#checks-de-higiene-web-scan-typewebcheck)
 - [Integração com plataformas](#integração-com-plataformas-hackerone--intigriti)
 - [Segurança e uso responsável](#segurança-e-uso-responsável)
 - [Estrutura do projeto](#estrutura-do-projeto)
@@ -29,8 +30,11 @@ aperta o botão final. Nada sai pra um programa sem sua confirmação manual.
 
 `megatron` é um analista de bug bounty que nunca dorme: um bot de Discord
 privado que você comanda com slash commands, orquestrando recon passivo
-(subfinder → httpx → nuclei) e scan ativo leve (ffuf, dalfox, sqlmap) contra
-alvos que **você explicitamente autorizou** em `scope.yaml`.
+(subfinder → httpx → nuclei), scan ativo leve (ffuf, dalfox, sqlmap) e um
+scan de higiene web em 11 categorias (`webcheck` — git/.env/backups
+expostos, Swagger/GraphQL, actuator/debug, headers/cookies, TLS, endpoints
+interessantes; veja [Checks de higiene web](#checks-de-higiene-web-scan-typewebcheck))
+contra alvos que **você explicitamente autorizou** em `scope.yaml`.
 
 A diferença pro "mais um script de recon": o Claude Code entra como cérebro
 analítico — não pra rodar comandos, mas pra **triar achados com foco em
@@ -51,11 +55,13 @@ flowchart LR
     Queue --> T2["httpx"]
     Queue --> T3["nuclei"]
     Queue --> T4["ffuf / dalfox / sqlmap"]
+    Queue --> T5["webcheck\n(git-dumper / sslyze / katana)"]
 
     T1 --> DB[("SQLite\nfindings")]
     T2 --> DB
     T3 --> DB
     T4 --> DB
+    T5 --> DB
 
     DB -->|"achados relevantes\n(severidade medium+)"| Claude["Claude headless\n(--restricted, 1x por job)"]
     Claude -->|"impacto + prioridade"| Bot
@@ -96,8 +102,10 @@ texto puro, não um agente com as mãos livres.
 
 **Não instale nenhuma ferramenta separadamente.** A imagem já vem com
 `subfinder`, `httpx`, `nuclei`, `katana`, `gau`, `dalfox` (compilados),
-`ffuf`/`sqlmap`/`nmap` (apt) e o próprio Claude Code CLI (npm) — tudo
-dentro do container. O único pré-requisito no host é o Docker instalado.
+`ffuf`/`sqlmap`/`nmap` (apt), `git-dumper`/`sslyze` (via `requirements.txt`,
+mesmo passo que já instala as libs Python) e o próprio Claude Code CLI (npm)
+— tudo dentro do container. O único pré-requisito no host é o Docker
+instalado.
 
 ```bash
 git clone https://github.com/gshell0st/megatron.git
@@ -133,9 +141,12 @@ cp scope.yaml.example scope.yaml
 Requer também: `subfinder`, `httpx`, `nuclei`, `katana`, `gau`, `ffuf`,
 `sqlmap`, `dalfox`, `nmap` no PATH (ou configurados via `TOOL_PATH_*` no
 `.env`) e o [Claude Code CLI](https://github.com/anthropics/claude-code)
-autenticado. **Esse é o único caminho de instalação que exige instalar as
-ferramentas você mesmo** — se não tem um motivo específico pra rodar fora
-de container, use o caminho Docker acima.
+autenticado. `git-dumper`/`sslyze` já vêm com `pip install -r
+requirements.txt` acima — se a venv não estiver ativada, `core/config.py`
+acha os binários em `.venv/bin/` automaticamente. **Esse é o único caminho
+de instalação que exige instalar as ferramentas você mesmo** — se não tem
+um motivo específico pra rodar fora de container, use o caminho Docker
+acima.
 
 Pra rodar 24/7 sem Docker, veja `scripts/run_dev.sh` (tmux) ou
 `scripts/megatron.service` (systemd --user, restart automático).
@@ -189,7 +200,7 @@ targets:
 | `/scope list\|add\|remove\|reload` | Gerencia `scope.yaml` |
 | `/scope import platform:hackerone\|intigriti handle:<programa>` | Importa escopo via API oficial do pesquisador (sempre como `mode=passive`) |
 | `/recon target` | Pipeline subfinder → httpx → nuclei |
-| `/scan target type:ffuf\|xss\|sqli [url]` | Scan ativo leve (exige `mode=active`; xss/sqli exigem `url` com parâmetro) |
+| `/scan target type:ffuf\|xss\|sqli\|webcheck [url]` | Scan ativo leve (exige `mode=active`; xss/sqli exigem `url` com parâmetro; `webcheck` roda as [11 categorias de higiene web](#checks-de-higiene-web-scan-typewebcheck)) |
 | `/jobs status [job_id]\|cancel job_id` | Acompanha/cancela jobs |
 | `/findings target [severity] [status]` | Lista achados |
 | `/backlog show target` | Ultimo diff ("beyond compare") registrado pro alvo desde o teste anterior |
@@ -203,6 +214,38 @@ targets:
 
 O heartbeat horário no canal de status mostra uptime, fila e uso de quota;
 o mesmo canal recebe um aviso quando a quota cruza 80%.
+
+## Checks de higiene web (`/scan type:webcheck`)
+
+Onze categorias, uma execução, um job — pra Claude nunca precisar vasculhar
+achado por achado. `core/checks/webcheck.py` faz as checagens em processo
+(sem subprocess) via `aiohttp`, e `core/pipelines/webcheck.py` orquestra as
+três ferramentas externas dedicadas (`git-dumper`, `sslyze`, `katana`) por
+cima. Cada categoria é pontuada com foco em **impacto real**, não em "path
+respondeu 200" — todo hit é primeiro validado contra uma baseline de
+soft-404 do próprio host (comparando o *conteúdo* da resposta, não só
+tamanho/status) antes de virar achado, e as categorias de conteúdo
+inspecionado (`.env`, backups, git, actuator) só sobem pra triagem do
+Claude quando o corpo da resposta bate com algo genuinamente sensível.
+
+| Categoria | O que verifica | Ferramenta |
+|---|---|---|
+| Exposed `.env` / secrets | Busca `.env*` e varre o conteúdo com regex de secrets (AWS key, chave privada, token Slack/GitHub, connection string com credencial) | `core/checks/webcheck.py` + `core/checks/secrets.py` |
+| Git exposto (`/.git/`) | Confirma `.git/HEAD`/`.git/config` reais (não só 200) e, se confirmado, **reconstrói o repositório** — evidência concreta, não só "path existe" | `core/checks/webcheck.py` → `git-dumper` |
+| Backup/config expostos | `backup.zip/.sql/.tar.gz`, `dump.sql`, `wp-config.php.bak`, `web.config`, etc. | `core/checks/webcheck.py` |
+| Swagger/OpenAPI exposto | Baixa e faz parse do doc, lista endpoints e sinaliza os que soam admin/internos | `core/checks/webcheck.py` |
+| GraphQL introspection habilitada | Query de introspecção real contra `/graphql` e variações; extrai mutations e sinaliza nomes perigosos (`delete*`, `reset*`, `grant*`, `impersonate*`) | `core/checks/webcheck.py` |
+| Actuator / debug endpoints | `/actuator/env\|heapdump\|beans\|configprops`, `phpinfo.php`, etc., severidade por endpoint (env/heapdump = crítico) | `core/checks/webcheck.py` |
+| Directory listing | Detecta marcadores de listagem ("Index of /") em diretórios comuns | `core/checks/webcheck.py` |
+| Security headers ausentes | CSP, HSTS (se https), X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy | `core/checks/webcheck.py` |
+| Cookies mal configurados | `Secure` (se https), `HttpOnly`, `SameSite` por cookie; severidade maior se o nome parece sessão/auth | `core/checks/webcheck.py` |
+| TLS/configuração insegura | SSLv2/v3/TLS1.0/1.1 habilitados, cifras fracas/anônimas, Heartbleed, ROBOT, cadeia de certificado não confiável | `sslyze` |
+| Endpoints interessantes descobertos | Crawl leve (profundidade 2, escopo por fqdn) pontuando por parâmetros + palavras-chave (`admin`, `debug`, `token`, `delete`...) — só os que pontuam alto viram achado, não o crawl inteiro | `katana` |
+
+`git-dumper`/`sslyze`/`katana` ausentes não impedem o boot — a categoria
+correspondente é pulada com uma nota de progresso, mesmo padrão do resto do
+projeto. Como qualquer scan ativo, `webcheck` exige `mode=active` em
+`scope.yaml` e respeita `rate_limit_rps`/`excluded_paths` do alvo.
 
 ## Integração com plataformas (HackerOne / Intigriti)
 
@@ -230,7 +273,11 @@ responsabilizam por uso indevido.
 Defaults conservadores por design: `nuclei` exclui tags `dos`/`fuzz`/
 `intrusive`/`default-login`; `sqlmap` roda em `--risk=1 --level=1`, sem
 técnicas destrutivas (stacked queries excluídas); `ffuf`/`dalfox` usam
-wordlists curtas e rate limit configurável por alvo.
+wordlists curtas e rate limit configurável por alvo; `webcheck` só probe
+listas curtas e curadas de paths (nunca brute-force genérico), valida cada
+hit contra uma baseline de soft-404 do host antes de confiar nele, e só
+chama `git-dumper` depois de confirmar (com corpo da resposta, não só
+status) que o `.git` está mesmo exposto — nunca "no escuro".
 
 ### Sobre volume de requisições e WAFs
 
@@ -240,11 +287,12 @@ volume de tráfego é limitado em várias camadas independentes, todas antes
 de qualquer requisição sair:
 
 - **`rate_limit_rps` por alvo** (`scope.yaml`) — respeitado por
-  `subfinder`, `httpx`, `nuclei`, `ffuf`, `dalfox` (via `--worker`) e
-  `sqlmap` (via `--delay`, derivado do mesmo valor). Nenhuma ferramenta
-  ativa roda sem essa checagem.
-- **`excluded_paths` por alvo** — prefixos que `ffuf`/`dalfox`/`sqlmap`
-  nunca tocam, mesmo que estejam na wordlist ou na URL passada.
+  `subfinder`, `httpx`, `nuclei`, `ffuf`, `dalfox` (via `--worker`),
+  `sqlmap` (via `--delay`, derivado do mesmo valor) e `webcheck`/`katana`
+  (via `--rl`/sleep entre requisições). Nenhuma ferramenta ativa roda sem
+  essa checagem.
+- **`excluded_paths` por alvo** — prefixos que `ffuf`/`dalfox`/`sqlmap`/
+  `webcheck` nunca tocam, mesmo que estejam na wordlist ou na URL passada.
 - **`MAX_HOSTS_FOR_HTTPX` / `MAX_HOSTS_FOR_NUCLEI`**
   (`core/pipelines/recon.py`) — travam quantos hosts um único `/recon` pode
   varrer, mesmo se `subfinder` devolver milhares de subdomínios (comum em
@@ -270,7 +318,8 @@ core/config.py       env vars, resolução de paths de tools
 core/scope/          scope.yaml loader + validador (o portão de segurança)
 core/db/             schema SQLite + wrapper async
 core/tools/          um wrapper por ferramenta (build_command + parse_output)
-core/pipelines/      orquestra os wrappers em sequência (recon.py, active_scan.py)
+core/checks/         checks HTTP em processo (sem subprocess) — webcheck.py, secrets.py
+core/pipelines/      orquestra os wrappers em sequência (recon.py, active_scan.py, webcheck.py)
 core/jobs/           fila asyncio + runner de subprocess
 core/claude_bridge/  invocação headless do Claude (quota, prompts, invoke)
 core/platforms/      clientes HackerOne (leitura+submit) e Intigriti (leitura)

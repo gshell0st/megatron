@@ -39,13 +39,20 @@ _FALLBACK_CANDIDATES: dict[str, list[str]] = {
     "dalfox": [str(Path.home() / "go/bin/dalfox")],
     "nmap": ["/usr/bin/nmap"],
     "claude": [str(Path.home() / ".nvm/versions/node/v23.11.0/bin/claude")],
+    # pip console-scripts: on the Docker image these land on PATH via a
+    # global --break-system-packages install, but a local dev venv only
+    # puts them on PATH if the venv is activated — fall back to the venv's
+    # own bin/ so `.venv/bin/python megatron ...` (unactivated) still finds them.
+    "git-dumper": [str(MEGATRON_HOME / ".venv/bin/git-dumper")],
+    "sslyze": [str(MEGATRON_HOME / ".venv/bin/sslyze")],
 }
 
 # Phase 1 tools the app refuses to boot without.
 REQUIRED_TOOLS = ("subfinder", "httpx", "nuclei", "claude")
-# Phase 1.5 / Phase 2 tools — resolved if present, missing ones just disable
-# the pipelines/commands that need them (checked lazily where used).
-OPTIONAL_TOOLS = ("katana", "gau", "ffuf", "sqlmap", "dalfox", "nmap")
+# Phase 1.5 / Phase 2 / Phase 3 (webcheck) tools — resolved if present,
+# missing ones just disable the pipelines/commands that need them (checked
+# lazily where used).
+OPTIONAL_TOOLS = ("katana", "gau", "ffuf", "sqlmap", "dalfox", "nmap", "git-dumper", "sslyze")
 
 
 def _resolve_tool_path(name: str) -> str | None:
