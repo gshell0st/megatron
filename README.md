@@ -192,6 +192,8 @@ targets:
 | `/scan target type:ffuf\|xss\|sqli [url]` | Scan ativo leve (exige `mode=active`; xss/sqli exigem `url` com parâmetro) |
 | `/jobs status [job_id]\|cancel job_id` | Acompanha/cancela jobs |
 | `/findings target [severity] [status]` | Lista achados |
+| `/backlog show target` | Ultimo diff ("beyond compare") registrado pro alvo desde o teste anterior |
+| `/backlog history target` | Lista os snapshots (testes) registrados pro alvo |
 | `/report target` | Resumo escrito (1 chamada Claude) dos achados pendentes |
 | `/submit draft target` | Rascunho de report HackerOne a partir de achados priorizados |
 | `/submit confirm draft_id` | Envia de fato — **nunca automático**, só nesse comando |
@@ -273,6 +275,8 @@ core/jobs/           fila asyncio + runner de subprocess
 core/claude_bridge/  invocação headless do Claude (quota, prompts, invoke)
 core/platforms/      clientes HackerOne (leitura+submit) e Intigriti (leitura)
 core/findings/       dedup por hash + filtro de severidade
+core/backlog/        snapshot por alvo, diff entre testes, contexto tipo-RAG
+                      (precedentes de triagem) injetado na próxima triagem
 ```
 
 Convenções de código e invariantes de segurança: [`CLAUDE.md`](CLAUDE.md).

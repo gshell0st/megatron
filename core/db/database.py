@@ -25,6 +25,25 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+_FINDINGS_MIGRATION_COLUMNS = (
+    ("priority", "INTEGER"),
+    ("impact", "TEXT"),
+    ("triage_note", "TEXT"),
+)
+
+
+def _migrate_sync(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS in schema.sql only helps on a fresh DB —
+    columns added later to an existing table need an explicit ALTER TABLE.
+    Guarded by 'duplicate column' so this stays idempotent and safe to run
+    on every boot, matching the always-safe-to-run contract of init_db()."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(findings)")}
+    for name, col_type in _FINDINGS_MIGRATION_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE findings ADD COLUMN {name} {col_type}")
+    conn.commit()
+
+
 def _init_db_sync() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     schema = _SCHEMA_PATH.read_text()
@@ -32,6 +51,7 @@ def _init_db_sync() -> None:
     try:
         conn.executescript(schema)
         conn.commit()
+        _migrate_sync(conn)
     finally:
         conn.close()
 

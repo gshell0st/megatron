@@ -70,6 +70,9 @@ core/pipelines/ orquestra os wrappers em sequência (recon.py = Fase 1)
 core/jobs/      fila asyncio + runner de subprocess + modelos
 core/claude_bridge/  invocação headless do Claude (quota, prompts, invoke)
 core/findings/  dedup por hash + filtro de severidade pra triagem
+core/backlog/   snapshot por alvo em data/backlog/, diff ("beyond compare")
+                entre testes, contexto tipo-RAG (precedentes de triagem do
+                próprio alvo) injetado na chamada de triagem
 core/platforms/ clientes de API do HackerOne (leitura+submit) e Intigriti (só leitura)
-data/           gitignored — runtime (DB, logs, saída bruta das tools)
+data/           gitignored — runtime (DB, logs, saída bruta das tools, backlog/)
 ```

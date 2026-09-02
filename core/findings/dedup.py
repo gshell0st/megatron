@@ -53,3 +53,15 @@ async def upsert_finding(
 
 async def set_finding_status(finding_id: int, status: str) -> None:
     await database.execute("UPDATE findings SET status = ? WHERE id = ?", (status, finding_id))
+
+
+async def set_finding_triage(
+    finding_id: int, status: str, priority: int | None, impact: str | None, note: str | None
+) -> None:
+    """Persists Claude's per-finding triage verdict, not just the status —
+    this is what lets a future retest's RAG-style context (core/backlog/context.py)
+    ground new findings in this target's actual past reasoning."""
+    await database.execute(
+        "UPDATE findings SET status = ?, priority = ?, impact = ?, triage_note = ? WHERE id = ?",
+        (status, priority, impact, note, finding_id),
+    )

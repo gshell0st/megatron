@@ -10,12 +10,15 @@ from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 from core.audit import log as audit_log
+from core.backlog.context import build_triage_context
+from core.backlog.diff import BacklogDiff
+from core.backlog.snapshot import capture as capture_backlog_snapshot
 from core.claude_bridge import invoke as claude_invoke
 from core.claude_bridge import quota as claude_quota
 from core.claude_bridge.invoke import ClaudeInvocationError
 from core.config import Settings
 from core.db import database
-from core.findings.dedup import set_finding_status
+from core.findings.dedup import set_finding_triage
 from core.findings.severity import get_triage_candidates
 from core.jobs import runner
 from core.pipelines.active_scan import run_active_scan_pipeline
@@ -165,9 +168,15 @@ class JobQueue:
             f"Job concluido: {summary.new_count} achados novos ({summary.total_count} no total)."
         )
 
-        await self._maybe_triage(job_id, target, progress)
+        _, diff = await capture_backlog_snapshot(target, job_id, job_type)
+        if not diff.is_first_scan:
+            await progress(diff.human_summary())
 
-    async def _maybe_triage(self, job_id: int, target: str, progress: SingleJobProgress) -> None:
+        await self._maybe_triage(job_id, target, diff, progress)
+
+    async def _maybe_triage(
+        self, job_id: int, target: str, diff: BacklogDiff, progress: SingleJobProgress
+    ) -> None:
         """Economical-brain gate: Claude is invoked at most once here, per
         job, and only if there's something in this job worth its attention."""
         candidates = await get_triage_candidates(job_id)
@@ -182,9 +191,13 @@ class JobQueue:
             )
             return
 
+        history_context = await build_triage_context(target, diff)
+
         await progress(f"Enviando {len(candidates)} achados para triagem do Claude...")
         try:
-            result = await claude_invoke.triage(self.settings, job_id, target, candidates)
+            result = await claude_invoke.triage(
+                self.settings, job_id, target, candidates, history_context=history_context
+            )
         except ClaudeInvocationError as e:
             await audit_log("system", "claude:triage_failed", target=target, job_id=job_id, error=str(e))
             await progress(f"Triagem do Claude falhou ({e}) — achados brutos disponiveis em /findings.")
@@ -195,7 +208,13 @@ class JobQueue:
             fid = item.get("id")
             verdict = item.get("verdict")
             if fid in by_id and verdict in _VERDICT_TO_STATUS:
-                await set_finding_status(fid, _VERDICT_TO_STATUS[verdict])
+                await set_finding_triage(
+                    fid,
+                    _VERDICT_TO_STATUS[verdict],
+                    priority=item.get("priority"),
+                    impact=item.get("impact"),
+                    note=item.get("note"),
+                )
 
         await audit_log("system", "claude:triage_done", target=target, job_id=job_id, summary=result.get("summary"))
         await progress(f"Triagem: {result.get('summary', '(sem resumo)')}")

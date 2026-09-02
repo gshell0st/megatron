@@ -89,6 +89,15 @@ the schema. Never recommend destructive, out-of-scope, or high-volume/aggressive
 — this operation is intentionally conservative and rate-limited. If nothing stands out, \
 return an empty next_actions list.
 
+If a "history" block is present in the DATA, this target has been tested before: use it as \
+grounding, not as a rulebook. "related_past_verdicts" shows how similar findings on this same \
+target were previously judged — weigh new findings against that precedent, but don't just \
+copy an old verdict; a superficially similar finding can have a different concrete impact. \
+"not_redetected_since_last_scan" lists findings that existed last scan but weren't seen \
+again — call these out in next_actions (e.g. manual-review) only if a plausible fix or \
+significant impact is at stake, since most disappear for mundane reasons (host down, rate \
+limiting). Silence about history in your summary is fine when there's nothing notable in it.
+
 Respond with JSON matching the provided schema only — no prose outside the JSON."""
 
 _REPORT_INSTRUCTIONS = """You are writing a concise written report for the operator, \
@@ -147,12 +156,19 @@ def build_submission_draft_prompt(target: str, findings: list[dict[str, Any]]) -
     return f"{_SUBMISSION_DRAFT_INSTRUCTIONS}\n\nDATA:\n{json.dumps(payload, default=str)}"
 
 
-def build_triage_prompt(job_id: int, target: str, findings: list[dict[str, Any]]) -> str:
+def build_triage_prompt(
+    job_id: int,
+    target: str,
+    findings: list[dict[str, Any]],
+    history_context: dict[str, Any] | None = None,
+) -> str:
     payload = {
         "job_id": job_id,
         "target": target,
         "findings": [_truncate_finding(f) for f in findings],
     }
+    if history_context is not None:
+        payload["history"] = history_context
     return f"{_TRIAGE_INSTRUCTIONS}\n\nDATA:\n{json.dumps(payload, default=str)}"
 
 

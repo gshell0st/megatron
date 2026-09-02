@@ -69,6 +69,7 @@ class MegatronBot(commands.Bot):
     async def setup_hook(self) -> None:
         from bot.commands import (
             active,
+            backlog_cmds,
             findings_cmds,
             jobs_cmds,
             recon,
@@ -82,6 +83,7 @@ class MegatronBot(commands.Bot):
         active.setup(self)
         jobs_cmds.setup(self)
         findings_cmds.setup(self)
+        backlog_cmds.setup(self)
         submit_cmds.setup(self)
         system_cmds.setup(self)
 

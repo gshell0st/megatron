@@ -131,8 +131,14 @@ async def _invoke(
     return _fallback_result(str(raw_result))
 
 
-async def triage(settings: Settings, job_id: int, target: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
-    prompt = build_triage_prompt(job_id, target, findings)
+async def triage(
+    settings: Settings,
+    job_id: int,
+    target: str,
+    findings: list[dict[str, Any]],
+    history_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    prompt = build_triage_prompt(job_id, target, findings, history_context=history_context)
     return await _invoke(settings, prompt, purpose="triage", job_id=job_id, log_name=f"triage_job{job_id}_{int(time.time())}")
 
 

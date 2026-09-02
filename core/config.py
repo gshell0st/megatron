@@ -22,6 +22,7 @@ DATA_DIR = MEGATRON_HOME / "data"
 LOGS_DIR = DATA_DIR / "logs"
 CLAUDE_RAW_LOG_DIR = LOGS_DIR / "claude_raw"
 RAW_OUTPUT_DIR = DATA_DIR / "raw"
+BACKLOG_DIR = DATA_DIR / "backlog"
 DB_PATH = DATA_DIR / "megatron.db"
 SCOPE_PATH = MEGATRON_HOME / "scope.yaml"
 
@@ -154,5 +155,5 @@ def load_settings() -> Settings:
 
 
 def ensure_data_dirs() -> None:
-    for d in (DATA_DIR, LOGS_DIR, CLAUDE_RAW_LOG_DIR, RAW_OUTPUT_DIR):
+    for d in (DATA_DIR, LOGS_DIR, CLAUDE_RAW_LOG_DIR, RAW_OUTPUT_DIR, BACKLOG_DIR):
         d.mkdir(parents=True, exist_ok=True)
