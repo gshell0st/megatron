@@ -20,6 +20,7 @@ aperta o botão final. Nada sai pra um programa sem sua confirmação manual.
 - [Criando o bot no Discord](#criando-o-bot-no-discord)
 - [Configurando o escopo](#configurando-o-escopo-obrigatório)
 - [Comandos](#comandos)
+- [Histórico de testes e retest (`/backlog`)](#histórico-de-testes-e-retest-backlog)
 - [Checks de higiene web (`/scan type:webcheck`)](#checks-de-higiene-web-scan-typewebcheck)
 - [Integração com plataformas](#integração-com-plataformas-hackerone--intigriti)
 - [Segurança e uso responsável](#segurança-e-uso-responsável)
@@ -29,12 +30,18 @@ aperta o botão final. Nada sai pra um programa sem sua confirmação manual.
 ## O que é isso
 
 `megatron` é um analista de bug bounty que nunca dorme: um bot de Discord
-privado que você comanda com slash commands, orquestrando recon passivo
-(subfinder → httpx → nuclei), scan ativo leve (ffuf, dalfox, sqlmap) e um
-scan de higiene web em 11 categorias (`webcheck` — git/.env/backups
-expostos, Swagger/GraphQL, actuator/debug, headers/cookies, TLS, endpoints
-interessantes; veja [Checks de higiene web](#checks-de-higiene-web-scan-typewebcheck))
-contra alvos que **você explicitamente autorizou** em `scope.yaml`.
+privado que você comanda com slash commands, orquestrando três camadas de
+teste contra alvos que **você explicitamente autorizou** em `scope.yaml`:
+
+1. **Recon passivo** — `subfinder → httpx → nuclei`.
+2. **Scan ativo leve** — `ffuf` (arquivos expostos), `dalfox` (XSS), `sqlmap`
+   (SQLi), e `webcheck` — 11 categorias de higiene web num único job
+   (git/.env/backups expostos, Swagger/GraphQL, actuator/debug, headers,
+   cookies, TLS, endpoints interessantes).
+3. **Memória entre testes** — todo job grava um snapshot em
+   `data/backlog/<alvo>/`; no próximo teste do mesmo alvo, um diff
+   determinístico mostra exatamente o que mudou desde a última vez, e esse
+   histórico vira contexto pra próxima triagem do Claude.
 
 A diferença pro "mais um script de recon": o Claude Code entra como cérebro
 analítico — não pra rodar comandos, mas pra **triar achados com foco em
@@ -51,19 +58,18 @@ flowchart LR
     Bot --> Queue["Fila de jobs\n(asyncio)"]
     Scope["scope.yaml\n(portão de autorização)"] -.valida antes de rodar.-> Queue
 
-    Queue --> T1["subfinder"]
-    Queue --> T2["httpx"]
-    Queue --> T3["nuclei"]
+    Queue --> T1["subfinder → httpx → nuclei"]
     Queue --> T4["ffuf / dalfox / sqlmap"]
     Queue --> T5["webcheck\n(git-dumper / sslyze / katana)"]
 
     T1 --> DB[("SQLite\nfindings")]
-    T2 --> DB
-    T3 --> DB
     T4 --> DB
     T5 --> DB
 
+    DB --> Backlog["snapshot + diff\n(data/backlog/, beyond-compare)"]
+
     DB -->|"achados relevantes\n(severidade medium+)"| Claude["Claude headless\n(--restricted, 1x por job)"]
+    Backlog -.contexto tipo-RAG\n(precedentes de triagem).-> Claude
     Claude -->|"impacto + prioridade"| Bot
 
     Bot -->|"/submit draft"| Claude
@@ -81,7 +87,7 @@ só a interface.
 ## Por que "econômico"
 
 O Claude **nunca vê uma linha crua de ferramenta**. O pipeline em Python
-filtra e deduplica tudo antes; Claude é chamado no máximo:
+filtra, deduplica e pontua tudo antes; Claude é chamado no máximo:
 
 - **1x por job** de recon/scan (triagem) — e só se houver achado relevante.
 - **1x por `/report`** — sob demanda.
@@ -180,9 +186,9 @@ alvo entra pelo próprio Discord, sem precisar mexer em nada no servidor —
 /scope add domain:novo-alvo.com mode:passive rate_limit_rps:5 excluded_paths:/admin,/billing
 ```
 já cria (ou atualiza) a entrada, incluindo os paths que `ffuf`/`dalfox`/
-`sqlmap` nunca devem tocar. `/scope import` faz o mesmo em lote a partir de
-um programa HackerOne/Intigriti. Editar `scope.yaml` direto continua
-possível pra revisar tudo de uma vez, mas nada aqui exige isso.
+`sqlmap`/`webcheck` nunca devem tocar. `/scope import` faz o mesmo em lote a
+partir de um programa HackerOne/Intigriti. Editar `scope.yaml` direto
+continua possível pra revisar tudo de uma vez, mas nada aqui exige isso.
 
 ```yaml
 targets:
@@ -203,8 +209,8 @@ targets:
 | `/scan target type:ffuf\|xss\|sqli\|webcheck [url]` | Scan ativo leve (exige `mode=active`; xss/sqli exigem `url` com parâmetro; `webcheck` roda as [11 categorias de higiene web](#checks-de-higiene-web-scan-typewebcheck)) |
 | `/jobs status [job_id]\|cancel job_id` | Acompanha/cancela jobs |
 | `/findings target [severity] [status]` | Lista achados |
-| `/backlog show target` | Ultimo diff ("beyond compare") registrado pro alvo desde o teste anterior |
-| `/backlog history target` | Lista os snapshots (testes) registrados pro alvo |
+| `/backlog show target` | Último diff ("beyond compare") desde o teste anterior — veja [Histórico de testes e retest](#histórico-de-testes-e-retest-backlog) |
+| `/backlog history target` | Lista todos os snapshots (testes) registrados pro alvo |
 | `/report target` | Resumo escrito (1 chamada Claude) dos achados pendentes |
 | `/submit draft target` | Rascunho de report HackerOne a partir de achados priorizados |
 | `/submit confirm draft_id` | Envia de fato — **nunca automático**, só nesse comando |
@@ -214,6 +220,38 @@ targets:
 
 O heartbeat horário no canal de status mostra uptime, fila e uso de quota;
 o mesmo canal recebe um aviso quando a quota cruza 80%.
+
+## Histórico de testes e retest (`/backlog`)
+
+Todo job de recon/scan termina gravando um snapshot completo dos achados do
+alvo em `data/backlog/<alvo>/<timestamp>__job<id>.json` — um histórico
+legível em disco, não só linhas numa tabela. No próximo teste do mesmo
+alvo, `core/backlog/diff.py` compara o snapshot novo com o anterior e monta
+um "beyond compare" determinístico:
+
+- **Achados novos** desde o último teste.
+- **Achados não redetectados** — existiam antes e não apareceram de novo
+  (pode ter sido corrigido, ou o host caiu; vale confirmar antes de
+  descartar).
+- **Hosts novos** e uma contagem do que ficou **inalterado**.
+
+Isso já aparece como mensagem de progresso no Discord logo após o job. Mas
+o uso mais importante é interno: esse diff alimenta a *mesma* chamada de
+triagem do Claude — **sem gastar invocação extra** — com um contexto no
+estilo RAG (`core/backlog/context.py`) montado a partir do histórico real
+do próprio alvo, não de um vetor DB genérico:
+
+- Os achados novos deste teste são cruzados com veredictos que o Claude já
+  deu **para esse mesmo alvo** em testes anteriores (mesma ferramenta +
+  mesmo tipo de achado) — se um `.env` exposto já foi julgado alto impacto
+  antes, essa precedência entra como contexto pra próxima decisão.
+- A lista de "não redetectado" entra também, pra Claude decidir se algo
+  disso merece uma ação de acompanhamento.
+
+Nada disso adiciona uma chamada de Claude nova: o histórico só torna a
+*mesma* chamada de triagem mais informada. Use `/backlog show target` pra
+ver o último diff sem gastar quota nenhuma, ou `/backlog history target`
+pra ver todos os testes já registrados.
 
 ## Checks de higiene web (`/scan type:webcheck`)
 
@@ -307,8 +345,8 @@ Recomendação prática: comece novos alvos com `rate_limit_rps` baixo (2–5),
 principalmente se o programa mencionar Cloudflare/Akamai/outro CDN-WAF na
 descrição do escopo — só suba depois de confirmar que não há bloqueios.
 Recon (`subfinder`/`httpx`/`nuclei`) já é 100% passivo/baixo-impacto por
-natureza; o cuidado maior é em `/scan` (ffuf/dalfox/sqlmap), que é onde o
-volume por segundo realmente importa.
+natureza; o cuidado maior é em `/scan` (ffuf/dalfox/sqlmap/webcheck), que é
+onde o volume por segundo realmente importa.
 
 ## Estrutura do projeto
 
@@ -324,15 +362,17 @@ core/jobs/           fila asyncio + runner de subprocess
 core/claude_bridge/  invocação headless do Claude (quota, prompts, invoke)
 core/platforms/      clientes HackerOne (leitura+submit) e Intigriti (leitura)
 core/findings/       dedup por hash + filtro de severidade
-core/backlog/        snapshot por alvo, diff entre testes, contexto tipo-RAG
-                      (precedentes de triagem) injetado na próxima triagem
+core/backlog/        snapshot por alvo, diff entre testes ("beyond compare"),
+                      contexto tipo-RAG (precedentes de triagem) injetado na
+                      próxima triagem — veja a seção acima
 ```
 
 Convenções de código e invariantes de segurança: [`CLAUDE.md`](CLAUDE.md).
 
 ## Roadmap
 
-- [ ] `katana`/`gau` no pipeline de recon (descoberta de endpoints)
+- [ ] `gau` como fonte passiva extra de URLs no pipeline de recon (`katana`
+      já está em uso, dentro de `/scan type:webcheck`)
 - [ ] Descoberta automática de URLs parametrizadas pra `/scan type:xss|sqli`
 - [ ] Deploy em instância cloud (hoje: WSL/local + Docker)
 
